@@ -61,7 +61,8 @@ def handle_disconnect():
 def start_video_stream(data):
     userName = data.get('userName')
     userId = data.get('userId')
-    print('Start streaming action received with custom data:', userName)
+    print('Start streaming action received with custom data userName -> :', userName)
+    print('Start streaming action received with custom data userId -> :', userId)
     if userId not in userId_to_session:
         session = UserSession()
         session.userName = userName 
@@ -93,10 +94,9 @@ def start_audio_stream(data):
 def end_video_stream(data):
     print('End streaming action received with custom data.')
     userName = data.get('userName', 'Not Found')
-    print("userName - > " + userName)
     userId = data.get('userId', 'Not Found')
-    print("userId - > " + userId)
-
+    print('End streaming action received with custom data userName -> :', userName)
+    print('End streaming action received with custom data userId -> :', userId)
     userId_to_session[userId].last_activity_time = time.time()
     upload_manager.complete_multipart_upload('/'.join([f'{userName}_{userId}', f'{userName}_{userId}_{userId_to_session[userId].rand_id}.webm']), userId_to_session[userId])
     upload_manager.complete_analytics_upload(userId_to_session[userId])
