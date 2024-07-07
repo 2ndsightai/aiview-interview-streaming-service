@@ -1,4 +1,4 @@
-from flask import Flask, request,jsonify
+from flask import Flask, request, jsonify
 from flask_socketio import SocketIO, join_room
 from upload_manager import UploadManager
 from session import UserSession
@@ -91,11 +91,21 @@ def start_audio_stream(data):
 
 @socketio.on('end_video_stream')
 def end_video_stream(data):
-    userName = data.get('userName')
-    userId = data.get('userId')
-    print('End streaming action received with custom data:', userName)
+    print('End streaming action received with custom data.')
+    userName = data.get('userName', 'Not Found')
+    print("userName - > " + userName)
+    userId = data.get('userId', 'Not Found')
+    print("userId - > " + userId)
+    interviewSessionId = data.get('interviewSessionId', 'Not Found')
+    print("interviewSessionId - > " + interviewSessionId)
+    interviewId = data.get('interviewId', 'Not Found')
+    print("interviewId - > " + interviewId)
+
+    if interviewId == 'Not Found':
+        interviewId = userName
+
     userId_to_session[userId].last_activity_time = time.time()
-    upload_manager.complete_multipart_upload('/'.join([f'{userName}_{userId}', f'{userName}_{userId}_{userId_to_session[userId].rand_id}.webm']), userId_to_session[userId])
+    upload_manager.complete_multipart_upload('/'.join([f'{interviewId}_{interviewSessionId}', f'{interviewId}_{interviewSessionId}_{userId_to_session[userId].rand_id}.webm']), userId_to_session[userId])
     upload_manager.complete_analytics_upload(userId_to_session[userId])
     upload_manager.storeInfo(userId_to_session[userId])
     if userId in userId_to_session:
