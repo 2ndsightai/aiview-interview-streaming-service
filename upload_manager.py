@@ -5,28 +5,37 @@ from amazon_transcribe.handlers import TranscriptResultStreamHandler
 from amazon_transcribe.model import TranscriptEvent
 from amazon_transcribe.utils import apply_realtime_delay
 import os
-import subprocess
+import aiofile
+import asyncio
 import requests
-os.environ['AWS_ACCESS_KEY_ID'] = 'AKIAYKN4CMVPVTTC6YNQ'
-os.environ['AWS_SECRET_ACCESS_KEY'] = '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'
+import time
+os.environ['AWS_ACCESS_KEY_ID'] = 'AKIA3PJMCAAEZSU2GHPZ'
+os.environ['AWS_SECRET_ACCESS_KEY'] = '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'
 import speech_recognition as sr
 from answer import Answer
 
 questions = ['question1', 'question2','question3','question4']
 
-
 class MyEventHandler(TranscriptResultStreamHandler):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.transcribed_text = ""
+
     async def handle_transcript_event(self, transcript_event: TranscriptEvent):
         results = transcript_event.transcript.results
         for result in results:
-            for alt in result.alternatives:
-              print(alt.transcript)
+            if not result.is_partial:
+                for alt in result.alternatives:
+                    self.transcribed_text += alt.transcript 
+
+    def get_transcribed_text(self):
+        return self.transcribed_text.strip()
 
 class UploadManager:
     def __init__(self):
-        self.region = 'us-east-2'
-        self.s3 = boto3.client('s3', region_name=self.region, aws_access_key_id='AKIAYKN4CMVPVTTC6YNQ', aws_secret_access_key='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')
-        self.bucket_name = 'user-interview-data'
+        self.region = 'us-east-1'
+        self.s3 = boto3.client('s3', region_name=self.region, aws_access_key_id='AKIA3PJMCAAEZSU2GHPZ', aws_secret_access_key='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')
+        self.bucket_name = '2ndsight-interview-data'
         self.chunk_size = 5 * 1024 * 1024  # 5MB chunk size
         self.client = TranscribeStreamingClient(region=self.region)
         self.SAMPLE_RATE = 16000
@@ -66,23 +75,40 @@ class UploadManager:
         except Exception as e:
             print(f"Error creating multi-part upload: {str(e)}")
             return None
-
-    def complete_multipart_upload(self, key, session):
+    
+    def complete_multipart_upload(self, key, session, max_retries=2):
+        retries = 0
         session.part_number += 1
         buffer_copy = session.buffer[:]
+        session.buffer = bytearray()
+        session.buffer_size = 0
         response = self.upload_part(key, session, bytes(buffer_copy))
         if response:
             session.parts.append(response)
-        try:
-            self.s3.complete_multipart_upload(
-                Bucket=self.bucket_name,
-                Key=key,
-                UploadId=session.multipart_upload_id,
-                MultipartUpload={'Parts': session.parts}
-            )
-            print('Multi-part upload complete for :', session.userName)
-        except Exception as e:
-            print(f"Error completing multi-part upload: {str(e)}")
+        while retries < max_retries:
+            try:
+                self.s3.complete_multipart_upload(
+                    Bucket=self.bucket_name,
+                    Key=key,
+                    UploadId=session.multipart_upload_id,
+                    MultipartUpload={'Parts': session.parts}
+                )
+                print('Multi-part upload complete for:', session.userName)
+                return  # Success, exit the function
+            except Exception as e:
+                print(f"Error completing multi-part upload: {str(e)}")
+                retries += 1
+                if retries < max_retries:
+                    print(f"Retrying after 2 seconds... Retry {retries}/{max_retries}")
+                    time.sleep(2)
+                else:
+                    print("Maximum retries reached. Upload failed.")
+    
+    def complete_analytics_upload(self, session):
+        out_file = f'{session.userName}_{session.userId}.csv'
+        self.s3.upload_file(out_file,self.bucket_name, '/'.join([f'{session.userName}_{session.userId}', out_file]))  
+        print('uploaded text file for session:', session.userName)
+        os.remove(out_file)      
 
     def buffer_and_upload(self, key, session, chunk):
         session.buffer.extend(chunk)
@@ -99,15 +125,25 @@ class UploadManager:
             if response:
                 session.parts.append(response)
     
-    def bufferAudiochunk(self, chunk, session):
-        session.audio_buffer.extend(chunk)
-
-    def save_wav_from_audio_blob(self, audio_blob, output_file):
-         with open(output_file, 'wb') as f:
-            f.write(audio_blob)
+    async def startAudioTranscribe(self, session):
+        session.stream = await self.client.start_stream_transcription(
+            language_code="en-US",
+            media_sample_rate_hz=self.SAMPLE_RATE,
+            media_encoding="pcm",
+        )
+        session.handler = MyEventHandler(session.stream.output_stream)
+        print("created audio stream transcribe for user :", session.userId)
+        
+    
+    async def bufferAudiochunk(self, chunk, session):
+        if session.stream != None:
+            await session.stream.input_stream.send_audio_event(audio_chunk=chunk)
+        else:
+            print("session none for user :", session.userId)
     
     def storeInfo(self, session):
-        s3URL = f'https://{self.bucket_name}.s3.{self.region}.amazonaws.com/{session.userName}_{session.userId}/{session.userName}_{session.userId}.webm'
+        s3URL = f'https://{self.bucket_name}.s3.{self.region}.amazonaws.com/{session.userName}_{session.userId}/{session.userName}_{session.userId}_{session.rand_id}.webm'
+        analytics = f'https://{self.bucket_name}.s3.{self.region}.amazonaws.com/{session.userName}_{session.userId}/{session.userName}_{session.userId}.csv'
         serialized_answers = []
         for answer in session.answers:
             serialized_answer = {
@@ -120,6 +156,7 @@ class UploadManager:
         payload = {
             "id": session.userId,
             "url": s3URL,
+            "analytics": analytics,
             "questions": serialized_answers
         }
         response = requests.post(api_url, json=payload)
@@ -127,20 +164,17 @@ class UploadManager:
         print("API Response:", response.json())
         return response
 
-    def transcribeAudioStream(self, session, blob):
-        input_wav_file = f"{session.userName}.wav"
-        self.save_wav_from_audio_blob(blob, input_wav_file)
-        file_audio = sr.AudioFile(input_wav_file)
-        r = sr.Recognizer()
-        with file_audio as source:
-            audio_text = r.record(source)
-        try:
-            text = r.recognize_google(audio_text)
-        except sr.UnknownValueError:
-            text = "NO RESPONSE"
-        os.remove(input_wav_file)
+    async def transcribe_audio_stream(self,session):
+        await session.stream.input_stream.end_stream()
+        await session.handler.handle_events()
+        return session.handler.get_transcribed_text()
+    
+    def transcribeAudioStream(self, session):
+        text = asyncio.run(self.transcribe_audio_stream(session))
+        print('received text', text)
         id = len(session.answers)
         answer = Answer(id, questions[id], text)
         session.answers.append(answer)
-        print(answer)
+        session.stream = None
+        session.handler = None
         return text   

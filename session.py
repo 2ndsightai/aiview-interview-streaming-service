@@ -10,3 +10,9 @@ class UserSession:
         self.sessionId = None
         self.audio_buffer = bytearray()
         self.answers = []
+        self.face_ID_eye_blink_dict ={}
+        self.frame_count =0
+        self.rand_id = None
+        self.stream = None
+        self.handler = None
+        self.last_activity_time = None
