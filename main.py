@@ -96,16 +96,9 @@ def end_video_stream(data):
     print("userName - > " + userName)
     userId = data.get('userId', 'Not Found')
     print("userId - > " + userId)
-    interviewSessionId = data.get('interviewSessionId', 'Not Found')
-    print("interviewSessionId - > " + interviewSessionId)
-    interviewId = data.get('interviewId', 'Not Found')
-    print("interviewId - > " + interviewId)
-
-    if interviewId == 'Not Found':
-        interviewId = userName
 
     userId_to_session[userId].last_activity_time = time.time()
-    upload_manager.complete_multipart_upload('/'.join([f'{interviewId}_{interviewSessionId}', f'{interviewId}_{interviewSessionId}_{userId_to_session[userId].rand_id}.webm']), userId_to_session[userId])
+    upload_manager.complete_multipart_upload('/'.join([f'{userName}_{userId}', f'{userName}_{userId}_{userId_to_session[userId].rand_id}.webm']), userId_to_session[userId])
     upload_manager.complete_analytics_upload(userId_to_session[userId])
     upload_manager.storeInfo(userId_to_session[userId])
     if userId in userId_to_session:
