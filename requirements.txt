@@ -6,3 +6,5 @@ amazon-transcribe==0.6.2
 SpeechRecognition==3.10.1
 boto3==1.34.62
 pillow==10.2.0
+aiofile==3.8.8
+caio==0.9.13
